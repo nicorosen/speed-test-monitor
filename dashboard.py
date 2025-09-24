@@ -303,9 +303,26 @@ def run_test():
 
     # Start the background task
     from threading import Thread
-    thread = Thread(target=lambda: list(generate_progress_and_set_flag())) # Consume generator in thread
+    
+    def run_test_thread():
+        try:
+            # Consume the generator to process all output
+            for _ in generate_progress_and_set_flag():
+                pass
+        except Exception as e:
+            error_msg = f"Error in speed test thread: {str(e)}"
+            print(f"ERROR: {error_msg}", flush=True)
+            progress_queue.append(f"ERROR: {error_msg}")
+        finally:
+            global test_in_progress
+            test_in_progress = False
+    
+    thread = Thread(target=run_test_thread)
+    thread.daemon = True  # Allow the thread to exit when the main program exits
     thread.start()
     print("STATUS: Speed test initiated. Check /api/test-progress for updates.", flush=True)
+    
+    return jsonify({"status": "test_started", "message": "Speed test initiated"})
     return jsonify({'status': 'Speed test initiated. Check /api/test-progress for updates.'})
 
 def add_cors_headers(response):

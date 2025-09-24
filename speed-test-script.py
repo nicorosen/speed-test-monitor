@@ -28,41 +28,91 @@ CONFIG = {
 
 def measure_speed() -> Tuple[float, float, Dict[str, Any]]:
     """
-    Measure internet speeds using speedtest.net
+    Measure internet speeds using speedtest.net with retry logic and fallback servers
     
     Returns:
         Tuple containing (download_speed, upload_speed, test_metadata)
     """
-    try:
-        st = speedtest.Speedtest()
-        print("STATUS: Finding best server...")
-        st.get_best_server()
-        print(f"STATUS: Best server found: {st.results.server['sponsor']} ({st.results.server['name']}, {st.results.server['country']})")
-        
-        print("STATUS: Testing download speed...")
-        download_speed = st.download() / 10**6  # Convert to Mbps
-        print("STATUS: Download test complete.")
-        
-        print("STATUS: Testing upload speed...")
-        upload_speed = st.upload() / 10**6  # Convert to Mbps
-        print("STATUS: Upload test complete.")
-        
-        # Collect additional test metadata
-        test_metadata = {
-            'server': st.results.server,
-            'client': st.results.client,
-            'timestamp': datetime.now().isoformat(),
-            'ping': st.results.ping
-        }
-        
-        return download_speed, upload_speed, test_metadata
-        
-    except speedtest.SpeedtestException as e:
-        print(f"ERROR: Speed test failed: {e}")
-        return 0, 0, {'error': str(e)}
-    except Exception as e:
-        print(f"ERROR: An unexpected error occurred: {e}")
-        return 0, 0, {'error': str(e)}
+    max_retries = 2
+    retry_delay = 3  # seconds
+    
+    # List of known good servers as fallback
+    fallback_servers = [
+        {'url': 'http://speedtest.tele2.net/speedtest/upload.php', 'name': 'Tele2', 'country': 'SE'},
+        {'url': 'http://speedtest.ookla.com/speedtest/upload.php', 'name': 'Ookla', 'country': 'US'},
+    ]
+    
+    last_error = None
+    
+    # First try with automatic server selection
+    for attempt in range(max_retries):
+        try:
+            st = speedtest.Speedtest()
+            print(f"STATUS: Finding best server (attempt {attempt + 1}/{max_retries})...")
+            st.get_best_server()
+            server_info = st.results.server
+            print(f"STATUS: Using server: {server_info['sponsor']} ({server_info['name']}, {server_info['country']})")
+            
+            # Test download with timeout
+            print("STATUS: Testing download speed...")
+            download_speed = st.download(timeout=30) / 10**6  # 30 second timeout
+            print(f"STATUS: Download test complete: {download_speed:.2f} Mbps")
+            
+            # Test upload with timeout
+            print("STATUS: Testing upload speed...")
+            upload_speed = st.upload(timeout=30) / 10**6  # 30 second timeout
+            print(f"STATUS: Upload test complete: {upload_speed:.2f} Mbps")
+            
+            # If we got here, the test was successful
+            return download_speed, upload_speed, {
+                'server': server_info,
+                'client': st.results.client,
+                'timestamp': datetime.now().isoformat(),
+                'ping': st.results.ping
+            }
+            
+        except Exception as e:
+            last_error = e
+            print(f"ERROR: Attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                print(f"STATUS: Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+    
+    # If we get here, all retries with auto server selection failed
+    print("WARNING: Auto server selection failed, trying fallback servers...")
+    
+    # Try fallback servers
+    for server in fallback_servers:
+        try:
+            print(f"STATUS: Trying fallback server: {server['name']}...")
+            st = speedtest.Speedtest()
+            st.get_servers([server])
+            st.get_best_server()
+            
+            print("STATUS: Testing download speed...")
+            download_speed = st.download(timeout=30) / 10**6
+            print(f"STATUS: Download test complete: {download_speed:.2f} Mbps")
+            
+            print("STATUS: Testing upload speed...")
+            upload_speed = st.upload(timeout=30) / 10**6
+            print(f"STATUS: Upload test complete: {upload_speed:.2f} Mbps")
+            
+            return download_speed, upload_speed, {
+                'server': st.results.server,
+                'client': st.results.client,
+                'timestamp': datetime.now().isoformat(),
+                'ping': st.results.ping
+            }
+            
+        except Exception as e:
+            print(f"WARNING: Fallback server {server['name']} failed: {str(e)}")
+            last_error = e
+            continue
+    
+    # If we get here, all attempts failed
+    error_msg = f"All speed test attempts failed. Last error: {str(last_error)}"
+    print(f"ERROR: {error_msg}")
+    raise Exception(error_msg)
 
 def log_speed(download_speed: float, upload_speed: float, test_metadata: Dict[str, Any]) -> Dict[str, Any]:
     """

@@ -234,17 +234,25 @@
                 eventSource.close();
                 eventSource = null;
             }
+            
+            // Reset state
+            isTestRunning = true;
             testCompletedSuccessfully = false;
+            btn.disabled = true;
+            icon.classList.add('hidden');
+            spinner.classList.remove('hidden');
+            testStatus.classList.remove('hidden');
+            progressBarContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            testStatus.textContent = 'Initiating speed test...';
+            testStatus.className = 'text-sm text-gray-600 mt-2';
+            
+            // Clear any previous error states
+            testStatus.classList.remove('text-red-600', 'text-green-600');
+            progressBar.className = 'progress-bar';
+            progressBar.style.backgroundColor = '#4CAF50'; // Reset to default color
 
             try {
-                isTestRunning = true;
-                btn.disabled = true;
-                icon.classList.add('hidden');
-                spinner.classList.remove('hidden');
-                testStatus.classList.remove('hidden');
-                progressBarContainer.classList.remove('hidden');
-                progressBar.style.width = '0%';
-                testStatus.textContent = 'Initiating speed test...';
                 
                 // Start the speed test on the backend
                 const response = await fetch('/api/run-test', { method: 'POST' });
@@ -276,6 +284,10 @@
                                 eventSource.close();
                                 eventSource = null;
                             }
+                            testStatus.textContent = 'Test completed successfully!';
+                            testStatus.className = 'text-sm text-green-600 mt-2';
+                            progressBar.style.width = '100%';
+                            progressBar.style.backgroundColor = '#4CAF50';
                             showNotification('Speed test completed successfully!', 'success');
                             loadData().then(() => {
                                 resetTestButton();
@@ -298,21 +310,35 @@
                                 progressBar.style.width = '80%';
                             } else if (data.message.includes("Upload test complete")) {
                                 progressBar.style.width = '90%';
-                            } else if (data.message.includes("Test complete") || data.message.includes("Speed test completed successfully!")) {
-                                progressBar.style.width = '100%';
                             }
                         }
                         
-                        if (data.error) {
-                            console.error('Error from server:', data.error);
-                            showNotification(`Error: ${data.error}`, 'error');
-                            testStatus.textContent = `Error: ${data.error}`;
+                        if (data.error || data.message?.includes('ERROR:')) {
+                            const errorMsg = data.error || data.message;
+                            console.error('Error from server:', errorMsg);
+                            
+                            // Handle 403 Forbidden specifically
+                            if (errorMsg.includes('403') || errorMsg.includes('Forbidden')) {
+                                testStatus.textContent = 'Error: Speed test server blocked the request (403 Forbidden). Please try again later or contact your network administrator.';
+                                progressBar.style.backgroundColor = '#ff9800'; // Orange for warning
+                            } else {
+                                testStatus.textContent = `Error: ${errorMsg}`;
+                                progressBar.style.backgroundColor = '#f44336'; // Red for error
+                            }
+                            
+                            testStatus.className = 'text-sm text-red-600 mt-2';
+                            showNotification(`Error: ${errorMsg}`, 'error');
+                            
                             if (eventSource) {
                                 eventSource.close();
                                 eventSource = null;
                             }
-                            resetTestButton();
-                            loadData();
+                            
+                            // Don't reset immediately, let the user see the error
+                            setTimeout(() => {
+                                resetTestButton();
+                                loadData();
+                            }, 5000);
                         }
                     } catch (e) {
                         console.error('Error processing SSE message:', e);
@@ -326,20 +352,34 @@
                         if (eventSource.readyState === EventSource.CLOSED) {
                             console.log('SSE connection closed by server');
                             if (!testCompletedSuccessfully) {
-                                testStatus.textContent = 'Connection closed. Test may still be running...';
-                                // Don't reset the button yet, load data to check status
-                                loadData().finally(() => {
-                                    resetTestButton();
-                                });
+                                testStatus.textContent = 'Connection to test server was lost. The test may still be running...';
+                                testStatus.className = 'text-sm text-orange-600 mt-2';
+                                progressBar.style.backgroundColor = '#ff9800'; // Orange for warning
+                                
+                                // Wait a moment, then check if the test completed
+                                setTimeout(() => {
+                                    loadData().finally(() => {
+                                        if (!testCompletedSuccessfully) {
+                                            testStatus.textContent = 'Could not determine test status. Please check back in a moment.';
+                                        }
+                                        resetTestButton();
+                                    });
+                                }, 3000);
                             }
                         } else {
                             // Other error occurred
                             console.error('SSE connection error:', err);
                             if (!testCompletedSuccessfully) {
-                                showNotification('Error connecting to test progress.', 'error');
-                                testStatus.textContent = 'Error connecting to test progress.';
-                                resetTestButton();
-                                loadData();
+                                testStatus.textContent = 'Error communicating with the test server. Please try again.';
+                                testStatus.className = 'text-sm text-red-600 mt-2';
+                                progressBar.style.backgroundColor = '#f44336'; // Red for error
+                                showNotification('Error: Could not connect to test progress.', 'error');
+                                
+                                // Reset after a delay
+                                setTimeout(() => {
+                                    resetTestButton();
+                                    loadData();
+                                }, 5000);
                             }
                         }
                         // Clean up the event source
@@ -350,10 +390,33 @@
 
             } catch (error) {
                 console.error('Error in runSpeedTest:', error);
-                showNotification(`Error: ${error.message}`, 'error');
-                testStatus.textContent = `Error: ${error.message}`;
-                resetTestButton();
-                loadData();
+                
+                // Handle different types of errors
+                let errorMessage = error.message;
+                
+                // Network errors (including CORS and connectivity issues)
+                if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Unable to connect to the server. Please check your internet connection.';
+                }
+                // 403 Forbidden errors
+                else if (error.message.includes('403') || error.message.includes('Forbidden')) {
+                    errorMessage = 'Access to the speed test server was denied (403 Forbidden). Please try again later.';
+                }
+                
+                // Update UI with error
+                testStatus.textContent = `Error: ${errorMessage}`;
+                testStatus.className = 'text-sm text-red-600 mt-2';
+                progressBar.style.backgroundColor = '#f44336'; // Red for error
+                progressBar.style.width = '100%';
+                
+                // Show error notification
+                showNotification(`Error: ${errorMessage}`, 'error');
+                
+                // Reset after a delay
+                setTimeout(() => {
+                    resetTestButton();
+                    loadData();
+                }, 5000);
             }
         }
 
@@ -364,35 +427,73 @@
             const testStatus = document.getElementById('testStatus');
             const progressBarContainer = document.getElementById('progressBarContainer');
             const progressBar = document.getElementById('progressBar');
-
+            
+            // Reset button state
+            if (btn) {
+                btn.disabled = false;
+            }
+            
+            if (icon) {
+                icon.classList.remove('hidden');
+            }
+            
+            if (spinner) {
+                spinner.classList.add('hidden');
+            }
+            
+            // Reset progress bar
+            if (progressBar) {
+                progressBar.style.width = '0%';
+                progressBar.style.backgroundColor = '#4CAF50'; // Reset to default green
+            }
+            
+            // Reset status message
+            if (testStatus) {
+                testStatus.textContent = 'Ready to run a speed test';
+                testStatus.className = 'text-sm text-gray-600 mt-2';
+                testStatus.classList.remove('hidden');
+            }
+            
+            // Hide progress bar container if it's visible
+            if (progressBarContainer) {
+                setTimeout(() => {
+                    if (progressBarContainer && !isTestRunning) {
+                        progressBarContainer.classList.add('hidden');
+                    }
+                }, 1000); // Delay to allow any final animations
+            }
+            
+            // Reset flags
             isTestRunning = false;
             testCompletedSuccessfully = false;
             
-            if (btn) btn.disabled = false;
-            if (icon) icon.classList.remove('hidden');
-            if (spinner) spinner.classList.add('hidden');
-            if (testStatus) {
-                testStatus.classList.add('hidden');
-                testStatus.textContent = ''; // Clear status message
+            // Ensure progress bar is hidden and reset
+            if (progressBarContainer) {
+                progressBarContainer.classList.add('hidden');
             }
-            if (progressBarContainer) progressBarContainer.classList.add('hidden');
-            if (progressBar) progressBar.style.width = '0%';
             
-            // Don't try to update speed data here as it might not be available
+            if (progressBar) {
+                progressBar.style.width = '0%';
+                progressBar.style.backgroundColor = '#4CAF50'; // Reset to default green
+            }
+            
             // The loadData() function will handle updating the UI with fresh data
         }
 
-        // Function to group timestamps by hour
+        // Function to group timestamps by hour with proper timezone handling
         function groupDataByHour(data) {
             const grouped = {};
             const { timestamps, download, upload, ping, server } = data;
             
+            // First pass: group data by hour in local time
             timestamps.forEach((ts, i) => {
                 if (!ts) return; // Skip invalid timestamps
                 
                 const date = new Date(ts);
-                // Group by hour
-                const hourKey = date.toISOString().split(':')[0] + ':00:00';
+                // Create a consistent hour key in local time
+                const localHour = new Date(date);
+                localHour.setMinutes(0, 0, 0); // Round down to nearest hour
+                const hourKey = localHour.getTime(); // Use timestamp as key to avoid timezone issues
                 
                 if (!grouped[hourKey]) {
                     grouped[hourKey] = {
@@ -400,11 +501,12 @@
                         upload: [],
                         ping: [],
                         count: 0,
-                        server: server[i] || 'N/A'
+                        server: server[i] || 'N/A',
+                        date: new Date(localHour)  // Store the local date object
                     };
                 }
                 
-                // Only add valid numeric values
+                // Add valid numeric values
                 if (typeof download[i] === 'number') {
                     grouped[hourKey].download.push(download[i]);
                 }
@@ -416,22 +518,29 @@
                 }
                 grouped[hourKey].count++;
             });
-            
-            // Calculate averages for each hour
+
+            // Prepare result object
             const result = {
                 timestamps: [],
                 download: [],
                 upload: [],
                 ping: [],
-                server: []
+                server: [],
+                dates: []
             };
             
-            Object.entries(grouped).forEach(([hour, data]) => {
-                result.timestamps.push(hour);
+            // Sort the groups by timestamp key (which is already a number)
+            const sortedGroups = Object.entries(grouped)
+                .sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+            
+            // Process each group
+            sortedGroups.forEach(([_, data]) => {
+                result.timestamps.push(data.date.toISOString());
                 result.download.push(average(data.download));
                 result.upload.push(average(data.upload));
                 result.ping.push(average(data.ping));
                 result.server.push(data.server);
+                result.dates.push(data.date);
             });
             
             return result;
@@ -473,32 +582,24 @@
                 downloadChart = destroyChart(downloadChart);
                 uploadChart = destroyChart(uploadChart);
                 
-                // Group data by hour
+                // Group and prepare data
                 const groupedData = groupDataByHour(data);
                 
-                // Create an array of objects with timestamp and index to sort
-                const timestampData = groupedData.timestamps.map((ts, i) => ({
-                    timestamp: ts,
-                    index: i,
-                    date: new Date(ts)
-                }));
-                
-                // Sort by date (oldest first)
-                timestampData.sort((a, b) => a.date - b.date);
-                
-                // Format dates for display
+                // Format dates for display in local timezone
                 const formatDate = (date) => {
+                    // Format as "Sep 24, 7 AM" or similar
                     return date.toLocaleString('en-US', {
                         month: 'short',
                         day: 'numeric',
-                        hour: '2-digit',
+                        hour: 'numeric',
                         hour12: true
                     });
                 };
                 
-                const sortedTimestamps = timestampData.map(item => formatDate(item.date));
-                const sortedDownload = timestampData.map(item => groupedData.download[item.index]);
-                const sortedUpload = timestampData.map(item => groupedData.upload[item.index]);
+                // Use the pre-sorted dates and data from groupDataByHour
+                const sortedTimestamps = groupedData.dates.map(date => formatDate(date));
+                const sortedDownload = groupedData.download;
+                const sortedUpload = groupedData.upload;
                 
                 // Common chart options
                 const chartOptions = {
