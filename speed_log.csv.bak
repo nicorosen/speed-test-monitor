@@ -1,3 +1,0 @@
-Timestamp,Download Speed (Mbps),Upload Speed (Mbps),Ping (ms),Server Host,Server Location,Client IP,Download Compliance (%),Upload Compliance (%),Error
-2025-09-23T12:38:26.843391,98.71,24.97,22.05,speedtest.sntc.ca.sailx.co:8080,"Santa Clara, CA, United States",98.42.43.238,49.35,124.84,
-2025-09-23T13:53:12.094668,1.52,0.65,25.82,sanfrancisco.getstreamhosting.com:8080,"Oakland, CA, United States",98.51.2.3,0.14,1.85,

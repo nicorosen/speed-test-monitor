@@ -1,17 +1,222 @@
 {
-  "generated_at": "2025-09-24T07:54:27.480678",
+  "generated_at": "2025-09-24T08:42:12.094766",
   "contracted_speeds": {
     "download_mbps": 1100,
     "upload_mbps": 35
   },
-  "tests": 26,
-  "average_download": 0.0,
-  "average_upload": 0.0,
-  "min_download": 0.0,
-  "min_upload": 0.0,
-  "max_download": 0.0,
-  "max_upload": 0.0,
-  "compliance_download": 0.0,
-  "compliance_upload": 0.0,
-  "last_test": "2025-09-24 07:54:27"
+  "tests": 2,
+  "time_periods": {
+    "last_24h": {
+      "tests": 2,
+      "download": [
+        155.2,
+        160.36
+      ],
+      "upload": [
+        5.07,
+        5.17
+      ],
+      "ping": [
+        32.1,
+        14.54
+      ],
+      "avg_download": 157.78,
+      "min_download": 155.2,
+      "max_download": 160.36,
+      "avg_upload": 5.12,
+      "min_upload": 5.07,
+      "max_upload": 5.17,
+      "avg_ping": 23.32,
+      "min_ping": 14.54,
+      "max_ping": 32.1
+    },
+    "last_week": {
+      "tests": 2,
+      "download": [
+        155.2,
+        160.36
+      ],
+      "upload": [
+        5.07,
+        5.17
+      ],
+      "ping": [
+        32.1,
+        14.54
+      ],
+      "avg_download": 157.78,
+      "min_download": 155.2,
+      "max_download": 160.36,
+      "avg_upload": 5.12,
+      "min_upload": 5.07,
+      "max_upload": 5.17,
+      "avg_ping": 23.32,
+      "min_ping": 14.54,
+      "max_ping": 32.1
+    },
+    "last_month": {
+      "tests": 2,
+      "download": [
+        155.2,
+        160.36
+      ],
+      "upload": [
+        5.07,
+        5.17
+      ],
+      "ping": [
+        32.1,
+        14.54
+      ],
+      "avg_download": 157.78,
+      "min_download": 155.2,
+      "max_download": 160.36,
+      "avg_upload": 5.12,
+      "min_upload": 5.07,
+      "max_upload": 5.17,
+      "avg_ping": 23.32,
+      "min_ping": 14.54,
+      "max_ping": 32.1
+    },
+    "all_time": {
+      "tests": 2,
+      "download": [
+        155.2,
+        160.36
+      ],
+      "upload": [
+        5.07,
+        5.17
+      ],
+      "ping": [
+        32.1,
+        14.54
+      ],
+      "avg_download": 157.78,
+      "min_download": 155.2,
+      "max_download": 160.36,
+      "avg_upload": 5.12,
+      "min_upload": 5.07,
+      "max_upload": 5.17,
+      "avg_ping": 23.32,
+      "min_ping": 14.54,
+      "max_ping": 32.1
+    }
+  },
+  "servers": {
+    "speedtest.sjc.sonic.net:8080": {
+      "location": "San Jose, CA, United States",
+      "tests": 1,
+      "download": {
+        "min": 155.2,
+        "max": 155.2
+      },
+      "upload": {
+        "min": 5.07,
+        "max": 5.07
+      },
+      "ping": {
+        "min": 32.1,
+        "max": 32.1
+      },
+      "last_tested": "2025-09-24T08:40:45.614000",
+      "avg_download": 155.2,
+      "avg_upload": 5.07,
+      "avg_ping": 32.1
+    },
+    "speed.juhsd.net.prod.hosts.ooklaserver.net:8080": {
+      "location": "Daly City, CA, United States",
+      "tests": 1,
+      "download": {
+        "min": 160.36,
+        "max": 160.36
+      },
+      "upload": {
+        "min": 5.17,
+        "max": 5.17
+      },
+      "ping": {
+        "min": 14.54,
+        "max": 14.54
+      },
+      "last_tested": "2025-09-24T08:42:12.089000",
+      "avg_download": 160.36,
+      "avg_upload": 5.17,
+      "avg_ping": 14.54
+    }
+  },
+  "summary": {
+    "download": {
+      "min": 155.2,
+      "max": 160.36,
+      "sum": 315.56,
+      "count": 2,
+      "average": 157.78,
+      "p10": 155.2,
+      "p25": 155.2,
+      "p50": 160.36,
+      "p75": 160.36,
+      "p90": 160.36,
+      "p95": 160.36
+    },
+    "upload": {
+      "min": 5.07,
+      "max": 5.17,
+      "sum": 10.24,
+      "count": 2,
+      "average": 5.12,
+      "p10": 5.07,
+      "p25": 5.07,
+      "p50": 5.17,
+      "p75": 5.17,
+      "p90": 5.17,
+      "p95": 5.17
+    },
+    "ping": {
+      "min": 14.54,
+      "max": 32.1,
+      "sum": 46.64,
+      "count": 2,
+      "average": 23.32,
+      "p10": 14.54,
+      "p25": 14.54,
+      "p50": 32.1,
+      "p75": 32.1,
+      "p90": 32.1,
+      "p95": 32.1
+    }
+  },
+  "compliance": {
+    "download": {
+      "meets": 0,
+      "total": 2,
+      "percentage": 0.0
+    },
+    "upload": {
+      "meets": 0,
+      "total": 2,
+      "percentage": 0.0
+    }
+  },
+  "recent_tests": [
+    {
+      "timestamp": "2025-09-24T08:42:12.089000",
+      "download": 160.36,
+      "upload": 5.17,
+      "ping": 14.54,
+      "server": "speed.juhsd.net.prod.hosts.ooklaserver.net:8080",
+      "server_location": "Daly City, CA, United States",
+      "client_ip": "98.42.43.238"
+    },
+    {
+      "timestamp": "2025-09-24T08:40:45.614000",
+      "download": 155.2,
+      "upload": 5.07,
+      "ping": 32.1,
+      "server": "speedtest.sjc.sonic.net:8080",
+      "server_location": "San Jose, CA, United States",
+      "client_ip": "98.42.43.238"
+    }
+  ],
+  "performance_grade": "F"
 }
