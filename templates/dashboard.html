@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internet Speed Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-bar-container {
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            margin-top: 10px;
+            height: 10px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #4CAF50;
+            border-radius: 5px;
+            text-align: center;
+            color: white;
+            transition: width 0.4s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">Internet Speed Dashboard</h1>
+                <p class="text-gray-600">Monitoring your connection quality</p>
+            </div>
+            <div class="flex flex-col items-end">
+                <button id="runTestBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md flex items-center gap-2">
+                    <i class="fas fa-sync-alt" id="testIcon"></i>
+                    <span>Run Speed Test</span>
+                    <div class="spinner hidden" id="testSpinner"></div>
+                </button>
+                <div id="testStatus" class="text-sm text-gray-600 mt-2 hidden"></div>
+                <div class="progress-bar-container hidden" id="progressBarContainer">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <!-- Download Speed Card -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">Download Speed</h2>
+                <div class="flex items-end justify-between">
+                    <div>
+                        <span class="text-4xl font-bold text-gray-800" id="downloadSpeed">--</span>
+                        <span class="text-gray-500">Mbps</span>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-sm text-gray-500">Contracted: <span id="contractedDownload">--</span> Mbps</p>
+                        <p class="text-sm" id="downloadPercentage">--% of contracted</p>
+                    </div>
+                </div>
+                <div class="mt-4 h-48">
+                    <canvas id="downloadChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Upload Speed Card -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">Upload Speed</h2>
+                <div class="flex items-end justify-between">
+                    <div>
+                        <span class="text-4xl font-bold text-gray-800" id="uploadSpeed">--</span>
+                        <span class="text-gray-500">Mbps</span>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-sm text-gray-500">Contracted: <span id="contractedUpload">--</span> Mbps</p>
+                        <p class="text-sm" id="uploadPercentage">--% of contracted</p>
+                    </div>
+                </div>
+                <div class="mt-4 h-48">
+                    <canvas id="uploadChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Tests Table -->
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-xl font-semibold text-gray-700">Recent Speed Tests</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Download (Mbps)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Upload (Mbps)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ping (ms)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Server</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentTests" class="bg-white divide-y divide-gray-200">
+                        <!-- Rows will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let isTestRunning = false;
+        let testCompletedSuccessfully = false;
+        let eventSource; // For Server-Sent Events
+        let downloadChart = null; // Chart instances
+        let uploadChart = null;
+
+        // Initialize the dashboard when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadData();
+            
+            // Set up the test button
+            document.getElementById('runTestBtn').addEventListener('click', runSpeedTest);
+            
+            // Refresh data every 5 minutes
+            setInterval(loadData, 5 * 60 * 1000);
+        });
+        
+        // Load data from the API
+        async function loadData() {
+            try {
+                console.log('Loading speed data...');
+                // Load speed data
+                const speedResponse = await fetch('/api/speed-data');
+                if (!speedResponse.ok) {
+                    throw new Error(`HTTP error! status: ${speedResponse.status}`);
+                }
+                const speedData = await speedResponse.json();
+                console.log('Speed data loaded:', speedData);
+                
+                // Check for error in response
+                if (speedData.error) {
+                    throw new Error(speedData.error);
+                }
+                
+                // Load summary data
+                const summaryResponse = await fetch('/api/summary');
+                if (!summaryResponse.ok) {
+                    throw new Error(`HTTP error! status: ${summaryResponse.status}`);
+                }
+                const summaryData = await summaryResponse.json();
+                console.log('Summary data loaded:', summaryData);
+                
+                // Transform data to match expected format
+                const formattedData = {
+                    timestamps: speedData.timestamps || [],
+                    download: speedData.download || [],
+                    upload: speedData.upload || [],
+                    ping: speedData.ping || [],
+                    server: speedData.server_host || []
+                };
+                
+                if (formattedData.timestamps.length > 0) {
+                    console.log(`Processing ${formattedData.timestamps.length} data points`);
+                    // Update the dashboard with the latest data
+                    updateCharts(formattedData);
+                    updateRecentTests(formattedData);
+                    
+                    // Update the latest speed values
+                    const lastIndex = formattedData.download.length - 1;
+                    if (formattedData.download[lastIndex] !== undefined) {
+                        document.getElementById('downloadSpeed').textContent = formattedData.download[lastIndex].toFixed(2);
+                    }
+                    if (formattedData.upload[lastIndex] !== undefined) {
+                        document.getElementById('uploadSpeed').textContent = formattedData.upload[lastIndex].toFixed(2);
+                    }
+                    
+                    // Update contracted speeds if available
+                    if (summaryData && summaryData.contracted_speeds) {
+                        const downloadMbps = summaryData.contracted_speeds.download_mbps || 0;
+                        const uploadMbps = summaryData.contracted_speeds.upload_mbps || 0;
+                        
+                        document.getElementById('contractedDownload').textContent = downloadMbps;
+                        document.getElementById('contractedUpload').textContent = uploadMbps;
+                        
+                        // Calculate and display percentages if we have valid values
+                        if (downloadMbps > 0 && formattedData.download[lastIndex] !== undefined) {
+                            const downloadPercent = (formattedData.download[lastIndex] / downloadMbps * 100).toFixed(1);
+                            document.getElementById('downloadPercentage').textContent = `${downloadPercent}% of contracted`;
+                        }
+                        
+                        if (uploadMbps > 0 && formattedData.upload[lastIndex] !== undefined) {
+                            const uploadPercent = (formattedData.upload[lastIndex] / uploadMbps * 100).toFixed(1);
+                            document.getElementById('uploadPercentage').textContent = `${uploadPercent}% of contracted`;
+                        }
+                    }
+                } else {
+                    console.warn('No speed data available in response');
+                    showNotification('No speed data available.', 'info');
+                }
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showNotification(`Error loading data: ${error.message}`, 'error');
+            }
+        }
+
+        // Function to run a speed test
+        async function runSpeedTest() {
+            if (isTestRunning) return;
+            
+            const btn = document.getElementById('runTestBtn');
+            const icon = document.getElementById('testIcon');
+            const spinner = document.getElementById('testSpinner');
+            const testStatus = document.getElementById('testStatus');
+            const progressBarContainer = document.getElementById('progressBarContainer');
+            const progressBar = document.getElementById('progressBar');
+
+            // Ensure a clean slate for EventSource and flags
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            testCompletedSuccessfully = false;
+
+            try {
+                isTestRunning = true;
+                btn.disabled = true;
+                icon.classList.add('hidden');
+                spinner.classList.remove('hidden');
+                testStatus.classList.remove('hidden');
+                progressBarContainer.classList.remove('hidden');
+                progressBar.style.width = '0%';
+                testStatus.textContent = 'Initiating speed test...';
+                
+                // Start the speed test on the backend
+                const response = await fetch('/api/run-test', { method: 'POST' });
+                if (!response.ok) {
+                    throw new Error(`Failed to start speed test: ${response.status} ${response.statusText}`);
+                }
+                
+                // Start listening for progress updates
+                eventSource = new EventSource('/api/test-progress');
+                
+                // Handle connection opened
+                eventSource.onopen = function() {
+                    console.log('SSE connection opened');
+                    testStatus.textContent = 'Running speed test...';
+                };
+                
+                // Handle messages
+                eventSource.onmessage = function(event) {
+                    if (!event.data) return;
+                    
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('SSE message:', data);
+                        
+                        if (data.event === 'test_complete' || data.event === 'complete') {
+                            console.log('Speed test completed event received');
+                            testCompletedSuccessfully = true;
+                            if (eventSource) {
+                                eventSource.close();
+                                eventSource = null;
+                            }
+                            showNotification('Speed test completed successfully!', 'success');
+                            loadData().then(() => {
+                                resetTestButton();
+                            });
+                            return;
+                        } 
+                        
+                        if (data.message) {
+                            testStatus.textContent = data.message;
+                            // Update progress bar based on status messages
+                            if (data.message.includes("Finding best server")) {
+                                progressBar.style.width = '10%';
+                            } else if (data.message.includes("Best server found")) {
+                                progressBar.style.width = '20%';
+                            } else if (data.message.includes("Testing download speed")) {
+                                progressBar.style.width = '40%';
+                            } else if (data.message.includes("Download test complete")) {
+                                progressBar.style.width = '60%';
+                            } else if (data.message.includes("Testing upload speed")) {
+                                progressBar.style.width = '80%';
+                            } else if (data.message.includes("Upload test complete")) {
+                                progressBar.style.width = '90%';
+                            } else if (data.message.includes("Test complete") || data.message.includes("Speed test completed successfully!")) {
+                                progressBar.style.width = '100%';
+                            }
+                        }
+                        
+                        if (data.error) {
+                            console.error('Error from server:', data.error);
+                            showNotification(`Error: ${data.error}`, 'error');
+                            testStatus.textContent = `Error: ${data.error}`;
+                            if (eventSource) {
+                                eventSource.close();
+                                eventSource = null;
+                            }
+                            resetTestButton();
+                            loadData();
+                        }
+                    } catch (e) {
+                        console.error('Error processing SSE message:', e);
+                    }
+                };
+                
+                eventSource.onerror = function(err) {
+                    console.error('EventSource error:', err);
+                    if (eventSource) {
+                        // Check if the connection was closed by the server
+                        if (eventSource.readyState === EventSource.CLOSED) {
+                            console.log('SSE connection closed by server');
+                            if (!testCompletedSuccessfully) {
+                                testStatus.textContent = 'Connection closed. Test may still be running...';
+                                // Don't reset the button yet, load data to check status
+                                loadData().finally(() => {
+                                    resetTestButton();
+                                });
+                            }
+                        } else {
+                            // Other error occurred
+                            console.error('SSE connection error:', err);
+                            if (!testCompletedSuccessfully) {
+                                showNotification('Error connecting to test progress.', 'error');
+                                testStatus.textContent = 'Error connecting to test progress.';
+                                resetTestButton();
+                                loadData();
+                            }
+                        }
+                        // Clean up the event source
+                        eventSource.close();
+                        eventSource = null;
+                    }
+                };
+
+            } catch (error) {
+                console.error('Error in runSpeedTest:', error);
+                showNotification(`Error: ${error.message}`, 'error');
+                testStatus.textContent = `Error: ${error.message}`;
+                resetTestButton();
+                loadData();
+            }
+        }
+
+        function resetTestButton() {
+            const btn = document.getElementById('runTestBtn');
+            const icon = document.getElementById('testIcon');
+            const spinner = document.getElementById('testSpinner');
+            const testStatus = document.getElementById('testStatus');
+            const progressBarContainer = document.getElementById('progressBarContainer');
+            const progressBar = document.getElementById('progressBar');
+
+            isTestRunning = false;
+            testCompletedSuccessfully = false;
+            
+            if (btn) btn.disabled = false;
+            if (icon) icon.classList.remove('hidden');
+            if (spinner) spinner.classList.add('hidden');
+            if (testStatus) {
+                testStatus.classList.add('hidden');
+                testStatus.textContent = ''; // Clear status message
+            }
+            if (progressBarContainer) progressBarContainer.classList.add('hidden');
+            if (progressBar) progressBar.style.width = '0%';
+            
+            // Don't try to update speed data here as it might not be available
+            // The loadData() function will handle updating the UI with fresh data
+        }
+
+        // Function to group timestamps by hour
+        function groupDataByHour(data) {
+            const grouped = {};
+            const { timestamps, download, upload, ping, server } = data;
+            
+            timestamps.forEach((ts, i) => {
+                if (!ts) return; // Skip invalid timestamps
+                
+                const date = new Date(ts);
+                // Group by hour
+                const hourKey = date.toISOString().split(':')[0] + ':00:00';
+                
+                if (!grouped[hourKey]) {
+                    grouped[hourKey] = {
+                        download: [],
+                        upload: [],
+                        ping: [],
+                        count: 0,
+                        server: server[i] || 'N/A'
+                    };
+                }
+                
+                // Only add valid numeric values
+                if (typeof download[i] === 'number') {
+                    grouped[hourKey].download.push(download[i]);
+                }
+                if (typeof upload[i] === 'number') {
+                    grouped[hourKey].upload.push(upload[i]);
+                }
+                if (ping && typeof ping[i] === 'number') {
+                    grouped[hourKey].ping.push(ping[i]);
+                }
+                grouped[hourKey].count++;
+            });
+            
+            // Calculate averages for each hour
+            const result = {
+                timestamps: [],
+                download: [],
+                upload: [],
+                ping: [],
+                server: []
+            };
+            
+            Object.entries(grouped).forEach(([hour, data]) => {
+                result.timestamps.push(hour);
+                result.download.push(average(data.download));
+                result.upload.push(average(data.upload));
+                result.ping.push(average(data.ping));
+                result.server.push(data.server);
+            });
+            
+            return result;
+        }
+        
+        // Helper function to calculate average
+        function average(arr) {
+            if (!arr || arr.length === 0) return 0;
+            return arr.reduce((a, b) => a + b, 0) / arr.length;
+        }
+        
+        // Function to safely destroy a chart if it exists
+        function destroyChart(chart) {
+            if (chart) {
+                try {
+                    chart.destroy();
+                } catch (e) {
+                    console.error('Error destroying chart:', e);
+                }
+            }
+            return null;
+        }
+
+        // Function to update charts
+        function updateCharts(data) {
+            try {
+                console.log('Updating charts with data:', data);
+                
+                // Get canvas elements
+                const downloadCanvas = document.getElementById('downloadChart');
+                const uploadCanvas = document.getElementById('uploadChart');
+                
+                if (!downloadCanvas || !uploadCanvas) {
+                    console.error('Canvas elements not found');
+                    return;
+                }
+                
+                // Destroy existing charts
+                downloadChart = destroyChart(downloadChart);
+                uploadChart = destroyChart(uploadChart);
+                
+                // Group data by hour
+                const groupedData = groupDataByHour(data);
+                
+                // Create an array of objects with timestamp and index to sort
+                const timestampData = groupedData.timestamps.map((ts, i) => ({
+                    timestamp: ts,
+                    index: i,
+                    date: new Date(ts)
+                }));
+                
+                // Sort by date (oldest first)
+                timestampData.sort((a, b) => a.date - b.date);
+                
+                // Format dates for display
+                const formatDate = (date) => {
+                    return date.toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        hour12: true
+                    });
+                };
+                
+                const sortedTimestamps = timestampData.map(item => formatDate(item.date));
+                const sortedDownload = timestampData.map(item => groupedData.download[item.index]);
+                const sortedUpload = timestampData.map(item => groupedData.upload[item.index]);
+                
+                // Common chart options
+                const chartOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 1000,
+                        easing: 'easeInOutQuart'
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    if (label && !isNaN(value)) {
+                                        return `${label}: ${value.toFixed(2)} Mbps`;
+                                    }
+                                    return !isNaN(value) ? value.toFixed(2) + ' Mbps' : 'N/A';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Date & Time (Grouped by Hour)'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 12
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Mbps'
+                            },
+                            beginAtZero: true
+                        }
+                    }
+                };
+
+                // Create Download Speed Chart
+                const downloadCtx = downloadCanvas.getContext('2d');
+                downloadChart = new Chart(downloadCtx, {
+                    type: 'line',
+                    data: {
+                        labels: sortedTimestamps,
+                        datasets: [{
+                            label: 'Download Speed',
+                            data: sortedDownload,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            pointRadius: 3,
+                            pointHoverRadius: 5,
+                            fill: true
+                        }]
+                    },
+                    options: chartOptions
+                });
+                
+                // Create Upload Speed Chart
+                const uploadCtx = uploadCanvas.getContext('2d');
+                uploadChart = new Chart(uploadCtx, {
+                    type: 'line',
+                    data: {
+                        labels: sortedTimestamps,
+                        datasets: [{
+                            label: 'Upload Speed',
+                            data: sortedUpload,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            pointRadius: 3,
+                            pointHoverRadius: 5,
+                            fill: true
+                        }]
+                    },
+                    options: chartOptions
+                });
+                
+                console.log('Charts updated successfully');
+                
+            } catch (error) {
+                console.error('Error updating charts:', error);
+                // Try to clean up any partially created charts
+                downloadChart = destroyChart(downloadChart);
+                uploadChart = destroyChart(uploadChart);
+                throw error; // Re-throw to be caught by the caller
+            }
+        }
+
+        // Function to update recent tests table
+        function updateRecentTests(data) {
+            const tbody = document.getElementById('recentTests');
+            if (!tbody) {
+                console.error('Recent tests table body not found');
+                return;
+            }
+            
+            if (!data) {
+                console.error('No data provided to updateRecentTests');
+                tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-sm text-red-500">Error: No data available</td></tr>';
+                return;
+            }
+            
+            // Clear existing rows
+            tbody.innerHTML = '';
+            
+            // Ensure we have the required arrays with fallbacks
+            const timestamps = data.timestamps || [];
+            const download = data.download || [];
+            const upload = data.upload || [];
+            const ping = data.ping || [];
+            const server = data.server || [];
+            
+            console.log(`Updating recent tests with ${timestamps.length} entries`);
+            
+            // Create an array of test objects with all required fields
+            const tests = [];
+            const maxLength = Math.max(timestamps.length, download.length, upload.length, ping.length, server.length);
+            
+            for (let i = 0; i < maxLength; i++) {
+                tests.push({
+                    timestamp: timestamps[i],
+                    download: download[i],
+                    upload: upload[i],
+                    ping: ping[i],
+                    server: server[i] || 'N/A'
+                });
+            }
+            
+            // Show only the 10 most recent tests (newest first)
+            const recentTests = [...tests]
+                .filter(test => test.timestamp) // Only include tests with a timestamp
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .slice(0, 10);
+            
+            if (recentTests.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">
+                        No test data available
+                    </td>
+                `;
+                tbody.appendChild(row);
+                return;
+            }
+            
+            recentTests.forEach((test, index) => {
+                try {
+                    const row = document.createElement('tr');
+                    // Add alternating row colors
+                    row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                    
+                    // Parse the date safely
+                    let date;
+                    try {
+                        date = test.timestamp ? new Date(test.timestamp) : new Date();
+                    } catch (e) {
+                        console.warn('Invalid date:', test.timestamp, e);
+                        date = new Date();
+                    }
+                    
+                    // Safely format values
+                    const formatValue = (value, isPing = false) => {
+                        if (value === undefined || value === null) return 'N/A';
+                        if (typeof value === 'number') {
+                            return isPing ? value.toFixed(0) : value.toFixed(2);
+                        }
+                        return value;
+                    };
+                    
+                    // Format the date
+                    const formattedDate = date.toLocaleString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true
+                    });
+                    
+                    row.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            ${formattedDate}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            ${formatValue(test.download)} Mbps
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            ${formatValue(test.upload)} Mbps
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            ${formatValue(test.ping, true)} ms
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 truncate max-w-xs" 
+                            title="${test.server || 'N/A'}">
+                            ${test.server || 'N/A'}
+                        </td>
+                    `;
+                    
+                    tbody.appendChild(row);
+                } catch (error) {
+                    console.error('Error rendering test row:', error, test);
+                }
+            });
+        }
+
+        // Function to show notifications
+        function showNotification(message, type = 'info') {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `fixed top-4 right-4 p-4 rounded-md shadow-lg text-white ${
+                type === 'error' ? 'bg-red-500' : 'bg-green-500'
+            }`;
+            notification.textContent = message;
+            
+            // Add to the page
+            document.body.appendChild(notification);
+            
+            // Remove after 5 seconds
+            setTimeout(() => {
+                notification.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

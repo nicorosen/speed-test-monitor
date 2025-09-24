@@ -1,0 +1,17 @@
+{
+  "generated_at": "2025-09-24T07:54:27.480678",
+  "contracted_speeds": {
+    "download_mbps": 1100,
+    "upload_mbps": 35
+  },
+  "tests": 26,
+  "average_download": 0.0,
+  "average_upload": 0.0,
+  "min_download": 0.0,
+  "min_upload": 0.0,
+  "max_download": 0.0,
+  "max_upload": 0.0,
+  "compliance_download": 0.0,
+  "compliance_upload": 0.0,
+  "last_test": "2025-09-24 07:54:27"
+}
