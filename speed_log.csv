@@ -1,3 +1,0 @@
-timestamp,download_mbps,upload_mbps,ping_ms,jitter_ms,packet_loss,server_host,server_name,server_sponsor,server_country,server_location,server_lat,server_lon,server_distance_km,client_ip,client_isp,client_lat,client_lon,download_percent,upload_percent,error
-2025-09-24T08:58:34.629838,1310.62,41.79,17.35,0.64,0,speed.juhsd.net:8080,Jefferson Union High School District,Unknown,United States,"Daly City, CA, United States",,,0,98.42.43.238,Comcast Cable,,,119.15,119.4,
-2025-09-24T08:59:50.828766,1281.72,41.75,17.7,0.73,0,stosat-scla-01.sys.comcast.net:8080,Comcast,Unknown,United States,"San Francisco, CA, United States",,,0,2601:645:4500:ff0:1c2b:c3fa:493d:d7e7,Comcast Cable,,,116.52,119.3,

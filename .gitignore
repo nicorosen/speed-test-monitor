@@ -1,0 +1,5 @@
+
+# Data files
+speed_log.csv
+speed_log_*.csv
+speed_report.json
