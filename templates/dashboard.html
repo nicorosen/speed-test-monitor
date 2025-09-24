@@ -4,38 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Internet Speed Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/output.css">
+    <script src="/static/js/chart.min.js"></script>
+    <link rel="stylesheet" href="/static/css/fontawesome.min.css">
+    <link rel="stylesheet" href="/static/css/solid.min.css">
     <style>
-        .spinner {
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #3498db;
-            border-radius: 50%;
-            width: 16px;
-            height: 16px;
-            animation: spin 1s linear infinite;
+        #testStatus {
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #4CAF50;
+            white-space: pre-line;
+            line-height: 1.5;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 14px;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .progress-bar-container {
-            width: 100%;
-            background-color: #e0e0e0;
-            border-radius: 5px;
-            margin-top: 10px;
-            height: 10px;
-            overflow: hidden;
-        }
-        .progress-bar {
-            height: 100%;
-            width: 0%;
-            background-color: #4CAF50;
-            border-radius: 5px;
-            text-align: center;
-            color: white;
-            transition: width 0.4s ease-in-out;
+        #testStatus.scrolling {
+            scroll-behavior: smooth;
         }
     </style>
 </head>
@@ -262,6 +250,7 @@
                 
                 // Start listening for progress updates
                 eventSource = new EventSource('/api/test-progress');
+                eventSource.onerror = handleEventSourceError;
                 
                 // Handle connection opened
                 eventSource.onopen = function() {
@@ -269,125 +258,222 @@
                     testStatus.textContent = 'Running speed test...';
                 };
                 
-                // Handle messages
+                
+                // Function to update status and handle progress
+                function updateStatus(message) {
+                    if (!message) return;
+                    
+                    // Clean up the status message for display
+                    let statusMsg = message.startsWith('STATUS: ') ? message.substring(8) : message;
+                    
+                    // Update the status text
+                    testStatus.textContent = statusMsg;
+                    
+                    // Update progress bar based on status messages
+                    if (message.includes('Checking if speedtest CLI')) {
+                        progressBar.style.width = '5%';
+                        progressBar.style.backgroundColor = '#2196F3'; // Blue
+                    } else if (message.includes('Speedtest CLI found')) {
+                        progressBar.style.width = '10%';
+                    } else if (message.includes('Initializing speed test')) {
+                        progressBar.style.width = '15%';
+                    } else if (message.includes('finding optimal server')) {
+                        progressBar.style.width = '20%';
+                        progressBar.style.backgroundColor = '#4CAF50'; // Green
+                    } else if (message.includes('Starting download test')) {
+                        progressBar.style.width = '30%';
+                    } else if (message.includes('Download speed:')) {
+                        const speedMatch = message.match(/Download speed: (\d+\.?\d*) Mbps/);
+                        if (speedMatch) {
+                            const speed = parseFloat(speedMatch[1]);
+                            const progress = 30 + Math.min((speed / 1000) * 30, 30);
+                            progressBar.style.width = `${progress}%`;
+                        }
+                    } else if (message.includes('Starting upload test')) {
+                        progressBar.style.width = '60%';
+                        progressBar.style.backgroundColor = '#FFC107'; // Amber
+                    } else if (message.includes('Upload speed:')) {
+                        const speedMatch = message.match(/Upload speed: (\d+\.?\d*) Mbps/);
+                        if (speedMatch) {
+                            const speed = parseFloat(speedMatch[1]);
+                            const progress = 60 + Math.min((speed / 100) * 30, 30);
+                            progressBar.style.width = `${progress}%`;
+                        }
+                    } else if (message.includes('Processing test results')) {
+                        progressBar.style.width = '95%';
+                        progressBar.style.backgroundColor = '#9C27B0'; // Purple
+                    } else if (message.includes('Final Results')) {
+                        progressBar.style.width = '98%';
+                    } else if (message.includes('Test completed successfully')) {
+                        progressBar.style.width = '100%';
+                        progressBar.style.backgroundColor = '#4CAF50'; // Green
+                        testCompletedSuccessfully = true; // Set flag on successful completion
+                        resetTestButton(); // Reset button state
+                        loadData(); // Load new data
+                    }
+                    
+                    // Scroll the status into view
+                    testStatus.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+                
+                // Handle messages from the server
                 eventSource.onmessage = function(event) {
-                    if (!event.data) return;
+                    if (!event.data || event.data.trim() === ':keepalive') {
+                        return; // Ignore keepalive messages and empty data
+                    }
                     
                     try {
-                        const data = JSON.parse(event.data);
-                        console.log('SSE message:', data);
+                        let data;
                         
-                        if (data.event === 'test_complete' || data.event === 'complete') {
-                            console.log('Speed test completed event received');
-                            testCompletedSuccessfully = true;
-                            if (eventSource) {
-                                eventSource.close();
-                                eventSource = null;
-                            }
-                            testStatus.textContent = 'Test completed successfully!';
-                            testStatus.className = 'text-sm text-green-600 mt-2';
-                            progressBar.style.width = '100%';
-                            progressBar.style.backgroundColor = '#4CAF50';
-                            showNotification('Speed test completed successfully!', 'success');
-                            loadData().then(() => {
-                                resetTestButton();
-                            });
+                        try {
+                            data = JSON.parse(event.data);
+                            console.log('SSE message:', data);
+                        } catch (parseError) {
+                            // If it's not valid JSON, treat it as a plain text message
+                            console.log('Received plain text message:', event.data);
+                            updateStatus(event.data);
                             return;
-                        } 
-                        
-                        if (data.message) {
-                            testStatus.textContent = data.message;
-                            // Update progress bar based on status messages
-                            if (data.message.includes("Finding best server")) {
-                                progressBar.style.width = '10%';
-                            } else if (data.message.includes("Best server found")) {
-                                progressBar.style.width = '20%';
-                            } else if (data.message.includes("Testing download speed")) {
-                                progressBar.style.width = '40%';
-                            } else if (data.message.includes("Download test complete")) {
-                                progressBar.style.width = '60%';
-                            } else if (data.message.includes("Testing upload speed")) {
-                                progressBar.style.width = '80%';
-                            } else if (data.message.includes("Upload test complete")) {
-                                progressBar.style.width = '90%';
-                            }
                         }
                         
-                        if (data.error || data.message?.includes('ERROR:')) {
-                            const errorMsg = data.error || data.message;
+                        // Handle message object
+                        if (data && data.message) {
+                            updateStatus(data.message);
+                        }
+                        
+                        // Handle completion event
+                        if (data && data.event === 'complete') {
+                            console.log('Test completed successfully');
+                            testCompletedSuccessfully = true;
+                            if (progressBar) {
+                                progressBar.style.width = '100%';
+                                progressBar.style.backgroundColor = '#4CAF50';
+                            }
+                            resetTestButton();
+                            loadData();
+                            return;
+                        }
+                        
+                        // Handle errors
+                        if (data && (data.error || (data.message && (data.message.includes('ERROR:') || data.message.includes('Error:'))))) {
+                            const errorMsg = data.error || data.message || 'Unknown error occurred';
                             console.error('Error from server:', errorMsg);
                             
-                            // Handle 403 Forbidden specifically
-                            if (errorMsg.includes('403') || errorMsg.includes('Forbidden')) {
-                                testStatus.textContent = 'Error: Speed test server blocked the request (403 Forbidden). Please try again later or contact your network administrator.';
-                                progressBar.style.backgroundColor = '#ff9800'; // Orange for warning
-                            } else {
+                            // Update UI to show error
+                            if (testStatus) {
                                 testStatus.textContent = `Error: ${errorMsg}`;
-                                progressBar.style.backgroundColor = '#f44336'; // Red for error
+                                testStatus.className = 'text-sm text-red-600 mt-2';
                             }
                             
-                            testStatus.className = 'text-sm text-red-600 mt-2';
-                            showNotification(`Error: ${errorMsg}`, 'error');
-                            
-                            if (eventSource) {
-                                eventSource.close();
-                                eventSource = null;
+                            if (progressBar) {
+                                progressBar.style.width = '100%';
+                                progressBar.style.backgroundColor = '#f44336';
+                                
+                                // Handle 403 Forbidden specifically
+                                if (errorMsg.includes('403') || errorMsg.includes('Forbidden')) {
+                                    progressBar.style.backgroundColor = '#ff9800';
+                                }
                             }
                             
-                            // Don't reset immediately, let the user see the error
+                            // Show error notification
+                            showNotification(`Test failed: ${errorMsg}`, 'error');
+                            
+                            // Reset after a delay
                             setTimeout(() => {
                                 resetTestButton();
                                 loadData();
                             }, 5000);
                         }
                     } catch (e) {
-                        console.error('Error processing SSE message:', e);
+                        console.error('Unexpected error in SSE message handler:', e);
+                        
+                        // Show error in status if possible
+                        if (testStatus) {
+                            testStatus.textContent = `Error: ${e.message || 'Unknown error occurred'}`;
+                            testStatus.className = 'text-sm text-red-600 mt-2';
+                        }
+                        
+                        // Update progress bar if available
+                        if (progressBar) {
+                            progressBar.style.width = '100%';
+                            progressBar.style.backgroundColor = '#f44336';
+                        }
+                        
+                        // Show error notification
+                        showNotification(`Error processing test data: ${e.message || 'Unknown error occurred'}`, 'error');
+                        
+                        // Reset after a delay
+                        setTimeout(() => {
+                            resetTestButton();
+                            loadData();
+                        }, 5000);
                     }
                 };
                 
-                eventSource.onerror = function(err) {
+                // Function to handle event source errors
+                function handleEventSourceError(err) {
                     console.error('EventSource error:', err);
-                    if (eventSource) {
-                        // Check if the connection was closed by the server
-                        if (eventSource.readyState === EventSource.CLOSED) {
-                            console.log('SSE connection closed by server');
-                            if (!testCompletedSuccessfully) {
-                                testStatus.textContent = 'Connection to test server was lost. The test may still be running...';
-                                testStatus.className = 'text-sm text-orange-600 mt-2';
-                                progressBar.style.backgroundColor = '#ff9800'; // Orange for warning
-                                
-                                // Wait a moment, then check if the test completed
-                                setTimeout(() => {
-                                    loadData().finally(() => {
-                                        if (!testCompletedSuccessfully) {
-                                            testStatus.textContent = 'Could not determine test status. Please check back in a moment.';
-                                        }
-                                        resetTestButton();
-                                    });
-                                }, 3000);
-                            }
-                        } else {
-                            // Other error occurred
-                            console.error('SSE connection error:', err);
-                            if (!testCompletedSuccessfully) {
-                                testStatus.textContent = 'Error communicating with the test server. Please try again.';
-                                testStatus.className = 'text-sm text-red-600 mt-2';
-                                progressBar.style.backgroundColor = '#f44336'; // Red for error
-                                showNotification('Error: Could not connect to test progress.', 'error');
-                                
-                                // Reset after a delay
-                                setTimeout(() => {
-                                    resetTestButton();
-                                    loadData();
-                                }, 5000);
-                            }
+                    if (!eventSource) return;
+                    
+                    // Don't show errors if the test completed successfully
+                    if (testCompletedSuccessfully) {
+                        if (eventSource) {
+                            eventSource.close();
+                            eventSource = null;
                         }
-                        // Clean up the event source
-                        eventSource.close();
+                        return;
+                    }
+                    
+                    // Check if the connection was closed by the server
+                    if (eventSource.readyState === EventSource.CLOSED) {
+                        console.log('SSE connection closed by server');
+                        testStatus.textContent = 'Connection to test server was closed. The test may still be running...';
+                        testStatus.className = 'text-sm text-orange-600 mt-2';
+                        
+                        if (progressBar) {
+                            progressBar.style.backgroundColor = '#ff9800'; // Orange for warning
+                        }
+                        
+                        // Wait a moment, then check if the test completed
+                        setTimeout(() => {
+                            loadData().finally(() => {
+                                if (!testCompletedSuccessfully) {
+                                    testStatus.textContent = 'Could not determine test status. The test may still be running in the background.';
+                                    showNotification('Test status unknown. Please check back in a moment.', 'warning');
+                                }
+                                resetTestButton();
+                            });
+                        }, 3000);
+                    } else {
+                        // Other error occurred
+                        console.error('SSE connection error:', err);
+                        testStatus.textContent = 'Error communicating with the test server. Please try again.';
+                        testStatus.className = 'text-sm text-red-600 mt-2';
+                        
+                        if (progressBar) {
+                            progressBar.style.width = '100%';
+                            progressBar.style.backgroundColor = '#f44336'; // Red for error
+                        }
+                        
+                        showNotification('Error: Could not connect to test progress. Please try again.', 'error');
+                        
+                        // Reset after a short delay
+                        setTimeout(() => {
+                            resetTestButton();
+                            loadData();
+                        }, 3000);
+                    }
+                    
+                    // Clean up the event source
+                    if (eventSource) {
+                        try {
+                            eventSource.close();
+                        } catch (e) {
+                            console.error('Error closing EventSource:', e);
+                        }
                         eventSource = null;
                     }
-                };
-
+                }
+                
             } catch (error) {
                 console.error('Error in runSpeedTest:', error);
                 

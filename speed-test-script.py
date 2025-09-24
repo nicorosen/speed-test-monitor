@@ -2,18 +2,18 @@
 """
 Internet Speed Test Monitor
 
-This script measures internet speeds and compares them against contracted ISP speeds.
-Results are logged to a CSV file for analysis.
+This script measures internet speeds using the official Speedtest CLI by Ookla and compares them 
+against contracted ISP speeds. Results are logged to a CSV file for analysis.
 """
 
-import speedtest
 import csv
 import os
 import json
 import argparse
 import time
+import subprocess
 from datetime import datetime
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
 
 # Configuration
 CONFIG = {
@@ -23,12 +23,30 @@ CONFIG = {
     },
     'log_file': 'speed_log.csv',
     'report_file': 'speed_report.json',
-    'min_test_interval': 300  # 5 minutes between tests when running in daemon mode
+    'min_test_interval': 300,  # 5 minutes between tests when running in daemon mode
+    'speedtest_cmd': 'speedtest',  # Using official Speedtest CLI
 }
+
+def run_command(cmd: list, timeout: int = 120) -> Tuple[bool, str, str]:
+    """Run a shell command with timeout and return (success, stdout, stderr)"""
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        stdout, stderr = process.communicate(timeout=timeout)
+        return process.returncode == 0, stdout, stderr
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return False, "", f"Command timed out after {timeout} seconds"
+    except Exception as e:
+        return False, "", str(e)
 
 def measure_speed() -> Tuple[float, float, Dict[str, Any]]:
     """
-    Measure internet speeds using speedtest.net with retry logic and fallback servers
+    Measure internet speeds using the official Speedtest CLI with detailed progress updates
     
     Returns:
         Tuple containing (download_speed, upload_speed, test_metadata)
@@ -36,83 +54,149 @@ def measure_speed() -> Tuple[float, float, Dict[str, Any]]:
     max_retries = 2
     retry_delay = 3  # seconds
     
-    # List of known good servers as fallback
-    fallback_servers = [
-        {'url': 'http://speedtest.tele2.net/speedtest/upload.php', 'name': 'Tele2', 'country': 'SE'},
-        {'url': 'http://speedtest.ookla.com/speedtest/upload.php', 'name': 'Ookla', 'country': 'US'},
-    ]
+    # Check if speedtest command is available
+    try:
+        print("STATUS: Checking if speedtest CLI is installed...")
+        subprocess.run([CONFIG['speedtest_cmd'], '--version'], 
+                      capture_output=True, check=True)
+        print("STATUS: Speedtest CLI found and ready")
+    except (subprocess.SubprocessError, FileNotFoundError):
+        raise Exception("Speedtest CLI not found. Please install it first: https://www.speedtest.net/apps/cli")
     
     last_error = None
     
-    # First try with automatic server selection
     for attempt in range(max_retries):
         try:
-            st = speedtest.Speedtest()
-            print(f"STATUS: Finding best server (attempt {attempt + 1}/{max_retries})...")
-            st.get_best_server()
-            server_info = st.results.server
-            print(f"STATUS: Using server: {server_info['sponsor']} ({server_info['name']}, {server_info['country']})")
+            print(f"STATUS: Starting speed test (attempt {attempt + 1}/{max_retries})...")
             
-            # Test download with timeout
-            print("STATUS: Testing download speed...")
-            download_speed = st.download(timeout=30) / 10**6  # 30 second timeout
-            print(f"STATUS: Download test complete: {download_speed:.2f} Mbps")
+            # Run the official Speedtest CLI with JSON output and progress
+            cmd = [
+                CONFIG['speedtest_cmd'],
+                '--format=json',
+                '--progress=yes',  # Enable progress updates
+                '--accept-license',
+                '--accept-gdpr',
+                '--precision=4'    # More precise measurements
+            ]
+            print("STATUS: Initializing speed test...")
+            print(f"STATUS: Running command: {' '.join(cmd)}")
             
-            # Test upload with timeout
-            print("STATUS: Testing upload speed...")
-            upload_speed = st.upload(timeout=30) / 10**6  # 30 second timeout
-            print(f"STATUS: Upload test complete: {upload_speed:.2f} Mbps")
+            # Use a process with streaming output to get real-time updates
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,  # Line buffered
+                universal_newlines=True
+            )
             
-            # If we got here, the test was successful
-            return download_speed, upload_speed, {
-                'server': server_info,
-                'client': st.results.client,
-                'timestamp': datetime.now().isoformat(),
-                'ping': st.results.ping
-            }
+            # Variables to capture the final JSON output
+            stdout = ""
             
+            # Process output in real-time
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line:
+                    stdout += line
+                    # Print progress updates to stderr so they don't interfere with JSON parsing
+                    if line.strip().startswith('{"type'):
+                        try:
+                            progress = json.loads(line.strip())
+                            if progress.get('type') == 'testStart':
+                                print("STATUS: Test started - finding optimal server...")
+                            elif progress.get('type') == 'downloadStart':
+                                print("STATUS: Starting download test...")
+                            elif progress.get('type') == 'download' and 'download' in progress:
+                                speed = progress['download']['bandwidth'] / 125000  # Convert to Mbps
+                                #print(f"STATUS: Download speed: {speed:.2f} Mbps")
+                            elif progress.get('type') == 'uploadStart':
+                                print("STATUS: Starting upload test...")
+                            elif progress.get('type') == 'upload' and 'upload' in progress:
+                                speed = progress['upload']['bandwidth'] / 125000  # Convert to Mbps
+                                #print(f"STATUS: Upload speed: {speed:.2f} Mbps")
+                            elif progress.get('type') == 'testEnd':
+                                print("STATUS: Test completed successfully")
+                        except json.JSONDecodeError:
+                            # Skip invalid JSON lines
+                            pass
+            
+            # Get the final result
+            success = process.returncode == 0
+            stderr = process.stderr.read()
+            
+            if not success:
+                raise Exception(f"Command failed with code {process.returncode}: {stderr}")
+                
+            # Parse the final JSON output
+            try:
+                print("STATUS: Processing test results...")
+                result = json.loads(stdout.splitlines()[-1])  # Get the last line which should be the final result
+                
+                # Extract metrics from the result
+                download_speed = result.get('download', {}).get('bandwidth', 0) / 125000  # Convert from bps to Mbps
+                upload_speed = result.get('upload', {}).get('bandwidth', 0) / 125000  # Convert from bps to Mbps
+                ping = result.get('ping', {}).get('latency', 0)
+                jitter = result.get('ping', {}).get('jitter', 0)
+                packet_loss = result.get('packetLoss', 0)
+                
+                print(f"STATUS: Final Results:")
+                print(f"STATUS:   Download: {download_speed:.2f} Mbps")
+                print(f"STATUS:   Upload: {upload_speed:.2f} Mbps")
+                print(f"STATUS:   Ping: {ping:.2f} ms")
+                print(f"STATUS:   Jitter: {jitter:.2f} ms")
+                print(f"STATUS:   Packet Loss: {packet_loss}%")
+                
+                # Get server info
+                server_info = result.get('server', {})
+                server_location = f"{server_info.get('name', 'Unknown')}, {server_info.get('location', 'Unknown')}, {server_info.get('country', 'Unknown')}"
+                print(f"STATUS: Server: {server_location}")
+                
+                # Get client info
+                client_info = result.get('interface', {})
+                isp_info = result.get('isp', '')
+                print(f"STATUS: ISP: {isp_info}")
+                print(f"STATUS: IP: {client_info.get('externalIp', 'Unknown')}")
+                
+                return download_speed, upload_speed, {
+                    'server': {
+                        'name': server_info.get('name', 'Unknown'),
+                        'sponsor': server_info.get('sponsor', 'Unknown'),
+                        'country': server_info.get('country', 'Unknown'),
+                        'location': server_info.get('location', 'Unknown'),
+                        'host': f"{server_info.get('host', '')}:{server_info.get('port', '')}",
+                        'distance': server_info.get('distance', 0),
+                        'lat': server_info.get('lat'),
+                        'lon': server_info.get('lon')
+                    },
+                    'client': {
+                        'ip': client_info.get('externalIp', ''),
+                        'isp': isp_info,
+                        'country': result.get('client', {}).get('country', ''),
+                        'lat': result.get('client', {}).get('lat'),
+                        'lon': result.get('client', {}).get('lon')
+                    },
+                    'timestamp': datetime.now().isoformat(),
+                    'ping': ping,
+                    'jitter': jitter,
+                    'packet_loss': packet_loss,
+                    'result_url': result.get('result', {}).get('url', '')
+                }
+                    
+            except json.JSONDecodeError as e:
+                raise Exception(f"Failed to parse JSON output: {e}")
+                
         except Exception as e:
-            last_error = e
-            print(f"ERROR: Attempt {attempt + 1} failed: {str(e)}")
+            last_error = str(e)
+            print(f"ERROR: {last_error}")
             if attempt < max_retries - 1:
-                print(f"STATUS: Retrying in {retry_delay} seconds...")
+                print(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
-    
-    # If we get here, all retries with auto server selection failed
-    print("WARNING: Auto server selection failed, trying fallback servers...")
-    
-    # Try fallback servers
-    for server in fallback_servers:
-        try:
-            print(f"STATUS: Trying fallback server: {server['name']}...")
-            st = speedtest.Speedtest()
-            st.get_servers([server])
-            st.get_best_server()
-            
-            print("STATUS: Testing download speed...")
-            download_speed = st.download(timeout=30) / 10**6
-            print(f"STATUS: Download test complete: {download_speed:.2f} Mbps")
-            
-            print("STATUS: Testing upload speed...")
-            upload_speed = st.upload(timeout=30) / 10**6
-            print(f"STATUS: Upload test complete: {upload_speed:.2f} Mbps")
-            
-            return download_speed, upload_speed, {
-                'server': st.results.server,
-                'client': st.results.client,
-                'timestamp': datetime.now().isoformat(),
-                'ping': st.results.ping
-            }
-            
-        except Exception as e:
-            print(f"WARNING: Fallback server {server['name']} failed: {str(e)}")
-            last_error = e
             continue
     
-    # If we get here, all attempts failed
-    error_msg = f"All speed test attempts failed. Last error: {str(last_error)}"
-    print(f"ERROR: {error_msg}")
-    raise Exception(error_msg)
+    raise Exception(f"Failed to measure speed after {max_retries} attempts. Last error: {last_error}")
 
 def log_speed(download_speed: float, upload_speed: float, test_metadata: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -121,20 +205,40 @@ def log_speed(download_speed: float, upload_speed: float, test_metadata: Dict[st
     Args:
         download_speed: Measured download speed in Mbps
         upload_speed: Measured upload speed in Mbps
-        test_metadata: Additional test metadata
+        test_metadata: Additional test metadata from speed test
         
     Returns:
         Dictionary containing the logged data
     """
+    # Extract server and client information with fallbacks
+    server_info = test_metadata.get('server', {})
+    client_info = test_metadata.get('client', {})
+    
+    # Format server location
+    server_location = server_info.get('name', 'Unknown')
+    if 'location' in server_info and server_info['location'] != 'Unknown':
+        server_location = f"{server_info['location']}, {server_info.get('country', 'Unknown')}"
+    
+    # Create log entry with all available data
     log_entry = {
         'timestamp': test_metadata.get('timestamp', datetime.now().isoformat()),
         'download_mbps': round(download_speed, 2),
         'upload_mbps': round(upload_speed, 2),
         'ping_ms': round(test_metadata.get('ping', 0), 2),
-        'server_host': test_metadata.get('server', {}).get('host', 'unknown'),
-        'server_location': f"{test_metadata.get('server', {}).get('name', 'Unknown')}, "
-                         f"{test_metadata.get('server', {}).get('country', 'Unknown')}",
-        'client_ip': test_metadata.get('client', {}).get('ip', 'unknown'),
+        'jitter_ms': round(test_metadata.get('jitter', 0), 2),
+        'packet_loss': test_metadata.get('packet_loss', 0),
+        'server_host': server_info.get('host', 'unknown'),
+        'server_name': server_info.get('name', 'unknown'),
+        'server_sponsor': server_info.get('sponsor', 'unknown'),
+        'server_country': server_info.get('country', 'unknown'),
+        'server_location': server_location,
+        'server_lat': server_info.get('lat'),
+        'server_lon': server_info.get('lon'),
+        'server_distance_km': round(server_info.get('distance', 0), 2) if 'distance' in server_info else None,
+        'client_ip': client_info.get('ip', 'unknown'),
+        'client_isp': client_info.get('isp', 'unknown'),
+        'client_lat': client_info.get('lat'),
+        'client_lon': client_info.get('lon'),
         'download_percent': round((download_speed / CONFIG['contracted_speeds']['download_mbps']) * 100, 2)
         if CONFIG['contracted_speeds']['download_mbps'] > 0 else 0,
         'upload_percent': round((upload_speed / CONFIG['contracted_speeds']['upload_mbps']) * 100, 2)
@@ -143,96 +247,75 @@ def log_speed(download_speed: float, upload_speed: float, test_metadata: Dict[st
     }
     
     # Ensure log directory exists
-    os.makedirs(os.path.dirname(os.path.abspath(CONFIG['log_file'])), exist_ok=True)
+    log_dir = os.path.dirname(os.path.abspath(CONFIG['log_file']))
+    if log_dir:  # Only create directory if path is not empty
+        os.makedirs(log_dir, exist_ok=True)
+    
+    # Define the field order for the CSV
+    fieldnames = [
+        'timestamp', 'download_mbps', 'upload_mbps', 'ping_ms', 'jitter_ms', 'packet_loss',
+        'server_host', 'server_name', 'server_sponsor', 'server_country', 'server_location',
+        'server_lat', 'server_lon', 'server_distance_km', 'client_ip', 'client_isp',
+        'client_lat', 'client_lon', 'download_percent', 'upload_percent', 'error'
+    ]
     
     # Write to CSV
     file_exists = os.path.isfile(CONFIG['log_file'])
     with open(CONFIG['log_file'], 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=log_entry.keys())
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not file_exists:
             writer.writeheader()
-        writer.writerow(log_entry)
+        
+        # Create a clean row with all fields in the right order
+        clean_row = {field: log_entry.get(field, '') for field in fieldnames}
+        writer.writerow(clean_row)
     
     return log_entry
-
-def generate_report() -> Dict[str, Any]:
-    """
-    Generate a summary report from the log file
-    
-    Returns:
-        Dictionary containing report data
-    """
-    if not os.path.exists(CONFIG['log_file']):
-        return {"error": "No log file found"}
-    
-    report = {
-        'generated_at': datetime.now().isoformat(),
-        'contracted_speeds': CONFIG['contracted_speeds'],
-        'tests': 0,
-        'average_download': 0,
-        'average_upload': 0,
-        'min_download': float('inf'),
-        'min_upload': float('inf'),
-        'max_download': 0,
-        'max_upload': 0,
-        'compliance_download': 0,  # Percentage of tests meeting download speed
-        'compliance_upload': 0     # Percentage of tests meeting upload speed
-    }
-    
-    download_speeds = []
-    upload_speeds = []
-    compliant_downloads = 0
-    compliant_uploads = 0
-    
-    # Read the log file
-    with open(CONFIG['log_file'], 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                dl = float(row.get('download_mbps', 0))
-                ul = float(row.get('upload_mbps', 0))
-                
-                download_speeds.append(dl)
-                upload_speeds.append(ul)
-                
-                if dl >= CONFIG['contracted_speeds']['download_mbps'] * 0.8:  # 80% of contracted speed
-                    compliant_downloads += 1
-                if ul >= CONFIG['contracted_speeds']['upload_mbps'] * 0.8:    # 80% of contracted speed
-                    compliant_uploads += 1
-                    
-            except (ValueError, KeyError):
-                continue
-    
-    # Calculate statistics
-    if download_speeds:
-        report.update({
-            'tests': len(download_speeds),
-            'average_download': round(sum(download_speeds) / len(download_speeds), 2),
-            'average_upload': round(sum(upload_speeds) / len(upload_speeds), 2),
-            'min_download': round(min(download_speeds), 2),
-            'min_upload': round(min(upload_speeds), 2),
-            'max_download': round(max(download_speeds), 2),
-            'max_upload': round(max(upload_speeds), 2),
-            'compliance_download': round((compliant_downloads / len(download_speeds)) * 100, 2),
-            'compliance_upload': round((compliant_uploads / len(upload_speeds)) * 100, 2),
-            'last_test': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        })
-    
-    # Save report to file
-    with open(CONFIG['report_file'], 'w') as f:
-        json.dump(report, f, indent=2)
-    
-    return report
 
 def print_summary(log_entry: Dict[str, Any]):
     """Print a summary of the speed test results"""
     print("\n=== Speed Test Results ===")
-    print(f"Time: {log_entry['timestamp']}")
-    print(f"Server: {log_entry['server_location']}")
-    print(f"Ping: {log_entry['ping_ms']} ms")
-    print(f"Download: {log_entry['download_mbps']} Mbps ({log_entry['download_percent']}% of contracted)")
-    print(f"Upload: {log_entry['upload_mbps']} Mbps ({log_entry['upload_percent']}% of contracted)")
-    print("=" * 25 + "\n")
+    print(f"Time: {log_entry.get('timestamp', 'N/A')}")
+    print(f"Server: {log_entry.get('server_name', 'Unknown')} ({log_entry.get('server_location', 'Unknown')})")
+    print(f"Ping: {log_entry.get('ping_ms', 0):.2f} ms")
+    print(f"Jitter: {log_entry.get('jitter_ms', 0):.2f} ms")
+    print(f"Packet Loss: {log_entry.get('packet_loss', 0)}%")
+    print(f"Download: {log_entry.get('download_mbps', 0):.2f} Mbps "
+          f"({log_entry.get('download_percent', 0):.2f}% of contracted)")
+    print(f"Upload: {log_entry.get('upload_mbps', 0):.2f} Mbps "
+          f"({log_entry.get('upload_percent', 0):.2f}% of contracted)")
+    
+    if log_entry.get('server_distance_km'):
+        print(f"Server Distance: {log_entry['server_distance_km']:.2f} km")
+    
+    # Show client info if available
+    if log_entry.get('client_ip') and log_entry['client_ip'] != 'unknown':
+        print(f"\nClient IP: {log_entry['client_ip']}")
+        if log_entry.get('client_isp') and log_entry['client_isp'] != 'unknown':
+            print(f"ISP: {log_entry['client_isp']}")
+    
+    # Show result URL if available
+    if log_entry.get('result_url'):
+        print(f"\nDetailed Results: {log_entry['result_url']}")
+    
+    # Show any errors if present
+    if log_entry.get('error'):
+        print(f"\nERROR: {log_entry['error']}")
+    
+    print("=" * 40 + "\n")
+
+def run_test():
+    """Run a single speed test and log the results"""
+    try:
+        print(f"STATUS: Running speed test at {datetime.now()}...")
+        download_speed, upload_speed, test_metadata = measure_speed()
+        log_entry = log_speed(download_speed, upload_speed, test_metadata)
+        print_summary(log_entry)
+        print("STATUS: Speed test completed successfully!")
+        return True
+    except Exception as e:
+        print(f"ERROR: Speed test failed: {e}")
+        return False
 
 def main():
     parser = argparse.ArgumentParser(description='Internet Speed Test Monitor')
@@ -243,53 +326,24 @@ def main():
     
     args = parser.parse_args()
     
-    if args.report:
+    if args.daemon:
+        print(f"Starting speed test daemon with {args.interval}s interval. Press Ctrl+C to stop.")
+        while True:
+            run_test()
+            print(f"Next test in {args.interval} seconds...")
+            time.sleep(args.interval)
+    elif args.report:
+        # Generate and display report
         report = generate_report()
         print("\n=== Speed Test Report ===")
-        print(f"Generated at: {report['generated_at']}")
-        print(f"Tests performed: {report['tests']}")
-        print(f"\nContracted Speeds: {report['contracted_speeds']['download_mbps']} Mbps down / "
-              f"{report['contracted_speeds']['upload_mbps']} Mbps up")
-        print("\nDownload Statistics:")
-        print(f"  Average: {report['average_download']} Mbps")
-        print(f"  Minimum: {report['min_download']} Mbps")
-        print(f"  Maximum: {report['max_download']} Mbps")
-        print(f"  Compliance: {report['compliance_download']}% of tests >= 80% of contracted speed")
-        print("\nUpload Statistics:")
-        print(f"  Average: {report['average_upload']} Mbps")
-        print(f"  Minimum: {report['min_upload']} Mbps")
-        print(f"  Maximum: {report['max_upload']} Mbps")
-        print(f"  Compliance: {report['compliance_upload']}% of tests >= 80% of contracted speed")
-        print("=" * 25 + "\n")
-        return
-    
-    if args.daemon:
-        print(f"Starting speed test daemon with {args.interval} second interval...")
-        print(f"Press Ctrl+C to stop\n")
-        
-        try:
-            while True:
-                run_test()
-                time.sleep(max(args.interval, CONFIG['min_test_interval']))
-        except KeyboardInterrupt:
-            print("\nStopping speed test daemon...")
+        print(f"Generated at: {report.get('generated_at')}")
+        print(f"Total tests: {report.get('total_tests', 0)}")
+        print(f"Average Download: {report.get('avg_download', 0):.2f} Mbps")
+        print(f"Average Upload: {report.get('avg_upload', 0):.2f} Mbps")
+        print(f"Average Ping: {report.get('avg_ping', 0):.2f} ms")
     else:
+        # Run a single test
         run_test()
-
-def run_test():
-    """Run a single speed test and log the results"""
-    print(f"STATUS: Running speed test at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}...")
-    download_speed, upload_speed, test_metadata = measure_speed()
-    
-    if download_speed > 0 or upload_speed > 0:
-        log_entry = log_speed(download_speed, upload_speed, test_metadata)
-        print_summary(log_entry)
-        
-        # Generate report after each test
-        generate_report()
-        print("STATUS: Speed test completed successfully!")
-    else:
-        print("ERROR: Speed test failed. Check your internet connection.")
 
 if __name__ == "__main__":
     main()
