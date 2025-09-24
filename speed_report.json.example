@@ -1,0 +1,27 @@
+{
+  "generated_at": "2025-09-24T09:05:29.123456",
+  "contracted_speeds": {
+    "download_mbps": 1100,
+    "upload_mbps": 35
+  },
+  "summary": {
+    "total_tests": 1,
+    "avg_download": 938.21,
+    "avg_upload": 43.31,
+    "avg_ping": 17.38,
+    "avg_jitter": 1.97,
+    "avg_packet_loss": 0.0
+  },
+  "recent_tests": [
+    {
+      "timestamp": "2025-09-24T09:01:56.265093",
+      "download_mbps": 938.21,
+      "upload_mbps": 43.31,
+      "ping_ms": 17.38,
+      "jitter_ms": 1.97,
+      "packet_loss": 0.0,
+      "server": "nike.coastside.net:8080",
+      "server_location": "Half Moon Bay, CA, United States"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+timestamp,download_mbps,upload_mbps,ping_ms,jitter_ms,packet_loss,server_host,server_name,server_sponsor,server_country,server_location,server_lat,server_lon,server_distance_km,client_ip,client_isp,client_lat,client_lon,download_percent,upload_percent,error
+2025-09-24T09:01:56.265093,938.21,43.31,17.38,1.97,0,nike.coastside.net:8080,Coastside.Net,Unknown,United States,"Half Moon Bay, CA, United States",37.4636,-122.4286,15.2,192.168.1.100,Example ISP,37.7749,-122.4194,85.29,123.75,
