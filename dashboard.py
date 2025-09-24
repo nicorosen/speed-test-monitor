@@ -338,19 +338,29 @@ def test_progress():
     def stream_events():
         global test_in_progress
         try:
-            while test_in_progress or progress_queue:
+            while True:  # Keep the connection open
                 if progress_queue:
                     message = progress_queue.popleft()
                     yield f"data: {json.dumps({'message': message})}\n\n"
+                # If test is done and no more messages, send completion event and break
+                elif not test_in_progress and not progress_queue:
+                    yield f"data: {json.dumps({'event': 'complete'})}\n\n"
+                    # Add a small delay before breaking to ensure the client gets the complete event
+                    time.sleep(1)
+                    break
                 else:
-                    time.sleep(0.5) # Wait for new messages
-            # Send a final event when done
-            yield f"data: {json.dumps({'event': 'complete'})}\n\n"
+                    # Send a keep-alive comment to prevent timeouts
+                    yield ":keepalive\n\n"
+                    time.sleep(0.5)  # Wait before checking for new messages
+                    
         except GeneratorExit:
             print("Client disconnected")
         except Exception as e:
             print(f"Error in stream_events: {e}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            try:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            except:
+                pass  # If we can't send the error, just exit
 
     response = app.response_class(
         stream_events(),
@@ -358,10 +368,11 @@ def test_progress():
         headers={
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'  # Disable buffering for nginx
+            'X-Accel-Buffering': 'no',  # Disable buffering for nginx
+            'Access-Control-Allow-Origin': '*',
         }
     )
-    return add_cors_headers(response)
+    return response
 
 if __name__ == '__main__':
     # Create templates directory if it doesn't exist
