@@ -269,6 +269,24 @@
                     testStatus.textContent = 'Running speed test...';
                 };
                 
+                eventSource.onerror = function(error) {
+                    console.error('SSE Error:', error);
+                    testStatus.textContent = 'Connection error. Please try again.';
+                    testStatus.className = 'text-sm text-red-600 mt-2';
+                    
+                    // Close the connection
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSource = null;
+                    }
+                    
+                    // Reset the button state
+                    resetTestButton();
+                    
+                    // Show error notification
+                    showNotification('Connection error during speed test', 'error');
+                };
+                
                 // Handle messages
                 eventSource.onmessage = function(event) {
                     if (!event.data) return;
@@ -277,23 +295,33 @@
                         const data = JSON.parse(event.data);
                         console.log('SSE message:', data);
                         
-                        if (data.event === 'test_complete' || data.event === 'complete') {
-                            console.log('Speed test completed event received');
+                        if (data.event === 'test_complete' || data.message?.includes('Test complete')) {
+                            console.log('Speed test completed event received', data);
                             testCompletedSuccessfully = true;
+                            
+                            // Close the event source if it exists
                             if (eventSource) {
                                 eventSource.close();
                                 eventSource = null;
                             }
+                            
+                            // Update UI to show completion
                             testStatus.textContent = 'Test completed successfully!';
                             testStatus.className = 'text-sm text-green-600 mt-2';
                             progressBar.style.width = '100%';
                             progressBar.style.backgroundColor = '#4CAF50';
+                            
+                            // Show success notification
                             showNotification('Speed test completed successfully!', 'success');
-                            loadData().then(() => {
-                                resetTestButton();
-                            });
+                            
+                            // Add a small delay to ensure the user sees the success message
+                            setTimeout(() => {
+                                // Reload the page to show updated data
+                                window.location.reload(true);
+                            }, 1000);
+                            
                             return;
-                        } 
+                        }
                         
                         if (data.message) {
                             testStatus.textContent = data.message;
@@ -313,9 +341,27 @@
                             }
                         }
                         
-                        if (data.error || data.message?.includes('ERROR:')) {
-                            const errorMsg = data.error || data.message;
+                        if (data.error || data.message?.includes('ERROR:') || data.message?.includes('Error:')) {
+                            const errorMsg = data.error || data.message || 'Unknown error occurred';
                             console.error('Error from server:', errorMsg);
+                            
+                            // Close the event source if it exists
+                            if (eventSource) {
+                                eventSource.close();
+                                eventSource = null;
+                            }
+                            
+                            // Update UI to show error
+                            testStatus.textContent = `Error: ${errorMsg}`;
+                            testStatus.className = 'text-sm text-red-600 mt-2';
+                            progressBar.style.width = '100%';
+                            progressBar.style.backgroundColor = '#f44336';
+                            
+                            // Show error notification
+                            showNotification(`Test failed: ${errorMsg}`, 'error');
+                            
+                            // Reset the button state
+                            resetTestButton();
                             
                             // Handle 403 Forbidden specifically
                             if (errorMsg.includes('403') || errorMsg.includes('Forbidden')) {
